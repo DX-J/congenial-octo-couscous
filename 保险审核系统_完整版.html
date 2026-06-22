@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>保险营销内容智能审核系统 - 完整版</title>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --primary: #667eea; --secondary: #764ba2; --success: #10b981; --danger: #ef4444; --warning: #f59e0b;
+            --bg-primary: #fff; --bg-secondary: #f7fafc; --text-primary: #1a202c; --text-secondary: #4a5568; --border: #e2e8f0;
+            --shadow: 0 4px 6px -1px rgba(0,0,0,0.1); --radius: 0.75rem;
+        }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg-secondary); }
+        .app-container { display: flex; height: 100vh; overflow: hidden; }
+        .sidebar { width: 260px; background: var(--bg-primary); border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+        .sidebar-header { padding: 1.5rem; border-bottom: 1px solid var(--border); }
+        .sidebar-header h2 { font-size: 1.25rem; background: linear-gradient(90deg, var(--primary), var(--secondary)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .sidebar-menu { flex: 1; padding: 1rem 0; }
+        .menu-item { width: 100%; padding: 0.875rem 1.5rem; border: none; background: transparent; text-align: left; cursor: pointer; font-size: 0.95rem; color: var(--text-secondary); transition: all 0.2s; display: flex; align-items: center; gap: 0.75rem; }
+        .menu-item:hover { background: var(--bg-secondary); }
+        .menu-item.active { background: linear-gradient(90deg, rgba(102,126,234,0.1), rgba(118,75,162,0.1)); color: var(--primary); font-weight: 500; border-right: 3px solid var(--primary); }
+        .sidebar-footer { padding: 1rem 1.5rem; border-top: 1px solid var(--border); }
+        .status-indicator { display: flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
+        .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+        .tab-content { display: none; flex: 1; overflow: hidden; }
+        .tab-content.active { display: flex; flex-direction: column; }
+        .chat-header { padding: 1.5rem; background: linear-gradient(135deg, var(--primary), var(--secondary)); color: white; text-align: center; }
+        .chat-header h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .chat-header p { font-size: 0.875rem; opacity: 0.9; }
+        .chat-messages { flex: 1; overflow-y: auto; padding: 1rem; background: var(--bg-secondary); }
+        .message { display: flex; gap: 0.75rem; margin-bottom: 1rem; animation: fadeIn 0.3s ease; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .message-avatar { width: 36px; height: 36px; border-radius: 50%; background: #edf2f7; display: flex; align-items: center; justify-content: center; font-size: 1.25rem; flex-shrink: 0; }
+        .message.user-message { flex-direction: row-reverse; }
+        .message-content { max-width: 75%; }
+        .message-text { padding: 0.75rem 1rem; border-radius: var(--radius); background: var(--bg-primary); box-shadow: var(--shadow); line-height: 1.6; font-size: 0.9rem; }
+        .user-message .message-text { background: linear-gradient(135deg, var(--primary), var(--secondary)); color: white; }
+        .bot-message .message-text { border-bottom-left-radius: 0.25rem; }
+        .user-message .message-text { border-bottom-right-radius: 0.25rem; }
+        .message-time { font-size: 0.7rem; color: #a0aec0; margin-top: 0.375rem; }
+        .user-message .message-time { text-align: right; }
+        .chat-input-container { padding: 1rem; background: var(--bg-primary); border-top: 1px solid var(--border); }
+        .input-wrapper { display: flex; gap: 0.75rem; align-items: flex-end; background: var(--bg-secondary); border-radius: var(--radius); padding: 0.5rem; border: 2px solid transparent; transition: border-color 0.2s; }
+        .input-wrapper:focus-within { border-color: var(--primary); }
+        .input-wrapper textarea { flex: 1; border: none; background: transparent; resize: none; font-size: 0.9rem; line-height: 1.5; max-height: 120px; font-family: inherit; }
+        .input-wrapper textarea:focus { outline: none; }
+        .send-button { width: 44px; height: 44px; border-radius: 50%; border: none; background: linear-gradient(135deg, var(--primary), var(--secondary)); color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: transform 0.2s; flex-shrink: 0; }
+        .send-button:hover { transform: scale(1.05); }
+        .send-button svg { width: 20px; height: 20px; }
+        .input-hint { font-size: 0.7rem; color: #a0aec0; margin-top: 0.375rem; text-align: center; }
+        .image-upload-area { border: 2px dashed var(--border); border-radius: var(--radius); padding: 2rem 1rem; text-align: center; cursor: pointer; transition: all 0.2s; margin-bottom: 1rem; }
+        .image-upload-area:hover { border-color: var(--primary); background: rgba(102,126,234,0.05); }
+        .image-upload-area.dragover { border-color: var(--primary); background: rgba(102,126,234,0.1); }
+        .image-preview { max-width: 100%; max-height: 250px; border-radius: var(--radius); margin-top: 1rem; display: none; }
+        .upload-icon { font-size: 2.5rem; margin-bottom: 0.5rem; }
+        .audit-result { margin-top: 0.75rem; padding: 0.75rem; background: var(--bg-secondary); border-radius: calc(var(--radius) / 2); }
+        .audit-result-item { display: flex; justify-content: space-between; align-items: flex-start; padding: 0.375rem 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; gap: 0.25rem; }
+        .audit-result-item:last-child { border-bottom: none; }
+        .audit-label { font-weight: 500; color: var(--text-secondary); font-size: 0.85rem; flex-shrink: 0; }
+        .audit-value { font-weight: 600; font-size: 0.85rem; word-break: break-word; }
+        .audit-value.compliance-no { color: var(--danger); }
+        .audit-value.compliance-yes { color: var(--success); }
+        .audit-value.violation-type { color: var(--danger); }
+        .audit-value.confidence { color: var(--primary); }
+        .ocr-extracted { margin-top: 0.5rem; padding: 0.5rem; background: #fff; border-radius: calc(var(--radius) / 2); font-size: 0.85rem; color: var(--text-secondary); word-break: break-word; }
+        .regulations-list { margin: 0; padding-left: 1.25rem; font-size: 0.75rem; color: #4a5568; }
+        .regulations-list li { margin: 0.25rem 0; line-height: 1.5; word-break: break-word; }
+        .loading-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(255,255,255,0.9); display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 1000; }
+        .loading-spinner { width: 45px; height: 45px; border: 4px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 1000; }
+        .modal-content { background: var(--bg-primary); padding: 1.5rem; border-radius: var(--radius); max-width: 90%; width: 400px; }
+        .modal-content h3 { margin-bottom: 1rem; }
+        .modal-content button { margin-top: 1rem; padding: 0.5rem 1rem; border: none; border-radius: calc(var(--radius) / 2); background: var(--primary); color: white; cursor: pointer; }
+        .btn-upload { padding: 0.5rem 1rem; border: none; border-radius: calc(var(--radius) / 2); background: var(--primary); color: white; cursor: pointer; margin-left: 0.5rem; }
+        .btn-upload:hover { opacity: 0.9; }
+
+        .mobile-menu-btn { display: none; position: fixed; top: 1rem; right: 1rem; width: 44px; height: 44px; border-radius: 50%; background: var(--primary); color: white; border: none; font-size: 1.25rem; z-index: 2000; }
+        .mobile-sidebar-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1500; }
+
+        @media (max-width: 768px) {
+            .sidebar { position: fixed; left: -260px; top: 0; bottom: 0; width: 260px; z-index: 1600; transition: left 0.3s; }
+            .sidebar.open { left: 0; }
+            .mobile-menu-btn { display: flex; align-items: center; justify-content: center; }
+            .mobile-sidebar-overlay.open { display: block; }
+            .chat-header h1 { font-size: 1.25rem; }
+            .chat-header p { font-size: 0.8rem; }
+            .message-content { max-width: 85%; }
+            .message-text { padding: 0.625rem 0.875rem; font-size: 0.85rem; }
+            .message-avatar { width: 32px; height: 32px; font-size: 1.1rem; }
+            .chat-messages { padding: 0.75rem; }
+            .chat-input-container { padding: 0.75rem; }
+            .input-wrapper { padding: 0.375rem; }
+            .send-button { width: 40px; height: 40px; }
+            .image-upload-area { padding: 1.5rem 0.75rem; }
+            .upload-icon { font-size: 2rem; }
+            .audit-result-item { flex-direction: column; }
+            .audit-label { margin-bottom: 0.125rem; }
+        }
+
+        @media (max-width: 480px) {
+            .sidebar { width: 240px; left: -240px; }
+            .sidebar.open { left: 0; }
+            .chat-header { padding: 1rem; }
+            .chat-header h1 { font-size: 1.1rem; }
+            .chat-messages { padding: 0.5rem; }
+            .message { margin-bottom: 0.75rem; }
+            .message-text { padding: 0.5rem 0.75rem; font-size: 0.8rem; }
+            .image-upload-area { padding: 1rem 0.5rem; }
+            .upload-icon { font-size: 1.75rem; }
+        }
+    </style>
+</head>
+<body>
+    <button class="mobile-menu-btn" onclick="toggleMobileSidebar()">☰</button>
+    <div class="mobile-sidebar-overlay" id="sidebarOverlay" onclick="toggleMobileSidebar()"></div>
+    
+    <div class="app-container">
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header"><h2>🔍 审核系统</h2></div>
+            <div class="sidebar-menu">
+                <button class="menu-item active" onclick="showTab('chat')">💬 智能审核</button>
+                <button class="menu-item" onclick="showTab('image')">📷 图片审核</button>
+                <button class="menu-item" onclick="showTab('document')">📄 文档审核</button>
+                <button class="menu-item" onclick="showTab('history')">📋 审核历史</button>
+            </div>
+            <div class="sidebar-footer">
+                <div class="status-indicator"><span class="status-dot"></span><span>演示模式</span></div>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <div id="chatTab" class="tab-content active">
+                <div class="chat-header">
+                    <h1>保险营销内容智能审核</h1>
+                    <p>基于规则引擎的智能审核系统（演示模式）</p>
+                </div>
+                <div class="chat-messages" id="chatMessages">
+                    <div class="message bot-message">
+                        <div class="message-avatar">🤖</div>
+                        <div class="message-content">
+                            <div class="message-text">您好！我是保险营销内容智能审核助手。请输入待审核内容。</div>
+                            <div class="message-time" id="welcomeTime"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="chat-input-container">
+                    <div class="input-wrapper">
+                        <textarea id="userInput" placeholder="输入待审核的保险营销内容..." rows="1" onkeydown="handleKeyDown(event)" oninput="autoResize(this)"></textarea>
+                        <button class="send-button" onclick="sendMessage()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M22 2L11 13M22 2L15 22L11 13M22 2L2 9L11 13"/></svg></button>
+                    </div>
+                    <div class="input-hint">按 Enter 发送，Shift + Enter 换行</div>
+                </div>
+            </div>
+
+            <div id="imageTab" class="tab-content">
+                <div class="chat-header">
+                    <h1>📷 图片广告审核</h1>
+                    <p>上传图片进行OCR识别和合规审核</p>
+                </div>
+                <div class="chat-messages" style="padding: 1rem;">
+                    <div class="image-upload-area" id="imageUploadArea" ondragover="handleDragOver(event)" ondrop="handleDrop(event)" onclick="triggerFileInput()">
+                        <div class="upload-icon">📤</div>
+                        <p>点击或拖拽图片到此处上传</p>
+                        <p style="font-size: 0.8rem; color: #a0aec0; margin-top: 0.375rem;">支持：PNG、JPG、JPEG、BMP</p>
+                    </div>
+                    <img id="imagePreview" class="image-preview" />
+                    <div id="imageResult"></div>
+                </div>
+                <input type="file" id="fileInput" accept="image/*" style="display: none;" onchange="handleFileSelect(event)" />
+            </div>
+
+            <div id="documentTab" class="tab-content">
+                <div class="chat-header">
+                    <h1>📄 文档内容审核</h1>
+                    <p>上传Word文档进行内容提取和合规审核</p>
+                </div>
+                <div class="chat-messages" style="padding: 1rem;">
+                    <div class="image-upload-area" id="documentUploadArea" ondragover="handleDocDragOver(event)" ondrop="handleDocDrop(event)" onclick="triggerDocFileInput()">
+                        <div class="upload-icon">📄</div>
+                        <p>点击或拖拽文档到此处上传</p>
+                        <p style="font-size: 0.8rem; color: #a0aec0; margin-top: 0.375rem;">支持：DOC、DOCX、TXT、PDF</p>
+                    </div>
+                    <div id="documentResult"></div>
+                </div>
+                <input type="file" id="docFileInput" accept=".doc,.docx,.txt,.pdf" style="display: none;" onchange="handleDocFileSelect(event)" />
+            </div>
+
+            <div id="historyTab" class="tab-content">
+                <div class="chat-header">
+                    <h1>📋 审核历史</h1>
+                    <p>查看所有审核记录</p>
+                </div>
+                <div class="chat-messages" id="historyList">
+                    <div class="message bot-message">
+                        <div class="message-avatar">📋</div>
+                        <div class="message-content">
+                            <div class="message-text">暂无审核记录</div>
+                            <div class="message-time"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner"></div>
+        <p>正在审核...</p>
+    </div>
+
+    <script>
+        let chatHistory = [];
+        let selectedImage = null;
+
+        function formatTime(date) {
+            return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+        }
+
+        function showTab(tabName) {
+            document.querySelectorAll('.menu-item').forEach(item => item.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
+            event.target.classList.add('active');
+            document.getElementById(tabName + 'Tab').classList.add('active');
+            if (tabName === 'history') updateHistoryView();
+            toggleMobileSidebar();
+        }
+
+        function toggleMobileSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('sidebarOverlay');
+            sidebar.classList.toggle('open');
+            overlay.classList.toggle('open');
+        }
+
+        function handleKeyDown(event) {
+            if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendMessage(); }
+        }
+
+        function autoResize(textarea) {
+            textarea.style.height = 'auto';
+            textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
+        }
+
+        const regulations = {
+            // 《银保监会关于规范保险销售行为的通知》
+            '保证': ['《银保监会关于规范保险销售行为的通知》第四条：保险机构及其从业人员不得对保险产品的收益作出确定性承诺', '《人身保险销售行为管理办法》第五条第四款：不得对保险产品的收益作出确定性承诺', '《金融产品网络营销管理办法》第十五条：不得对收益作出保证性承诺'],
+            '保底': ['《银保监会关于规范保险销售行为的通知》第四条：不得夸大保险产品的收益或者缩小保险产品的风险', '《人身保险销售行为管理办法》第五条第五款：不得夸大保险产品的收益或者缩小保险产品的风险'],
+            '无风险': ['《人身保险销售行为管理办法》第七条第四款：不得使用"无风险"等误导性表述', '《保险销售行为管理办法》第五条第二款：不得对保险产品的收益作出虚假或者引人误解的宣传', '《互联网保险业务监管办法》第十九条：不得承诺投资本金不受损失'],
+            '零风险': ['《人身保险销售行为管理办法》第七条第四款：不得使用"零风险"等误导性表述', '《保险销售行为管理办法》第五条第二款：不得对保险产品的收益作出虚假或者引人误解的宣传'],
+            '稳赚': ['《人身保险销售行为管理办法》第七条第四款：不得使用"稳赚"等误导性表述', '《保险销售行为管理办法》第五条第二款：不得对保险产品的收益作出虚假或者引人误解的宣传'],
+            '收益率': ['《银保监会关于规范保险销售行为的通知》第四条：保险机构及其从业人员不得对保险产品的收益作出确定性承诺', '《人身保险销售行为管理办法》第五条第四款：不得对保险产品的收益作出确定性承诺'],
+            '保本': ['《人身保险销售行为管理办法》第七条第四款：不得使用"保本"等误导性表述', '《银保监会关于规范保险销售行为的通知》第四条：不得夸大保险产品的收益'],
+            '本金安全': ['《人身保险销售行为管理办法》第七条第四款：不得使用误导性表述承诺本金安全', '《保险销售行为管理办法》第五条第二款：不得对保险产品的收益作出虚假或者引人误解的宣传'],
+            '最好的': ['《保险销售行为管理办法》第五条第二款：不得对保险产品作出引人误解的宣传', '《人身保险销售行为管理办法》第六条第六款：不得诋毁其他保险机构或者保险产品进行不当比较'],
+            '错过可惜': ['《保险销售行为管理办法》第五条第二款：不得进行引人误解的宣传', '《人身保险销售行为管理办法》第七条：宣传应当真实、准确、完整'],
+            '稳赚不赔': ['《人身保险销售行为管理办法》第七条第四款：不得使用"稳赚"等误导性表述', '《银保监会关于规范保险销售行为的通知》第四条：不得对保险产品的收益作出确定性承诺'],
+            // 《保险销售行为管理办法》新增规则
+            '必须购买': ['《保险销售行为管理办法》第十七条第（五）款：不得使用强制搭售、默认勾选等方式', '《金融产品网络营销管理办法》第十二条：不得默认勾选或者强制搭售商品或服务'],
+            '帮您代': ['《保险销售行为管理办法》第十七条第（六）款、第十九条：不得代替投保人签名、填写', '《互联网保险业务监管办法》第二十三条：保险机构应当确保投保人本人签署相关文件'],
+            '不用看': ['《保险销售行为管理办法》第十五条：保险机构应当向投保人说明保险合同的内容', '《人身保险销售行为管理办法》第十一条：应当向投保人明确说明免除保险人责任的条款'],
+            '如实告知': ['《保险销售行为管理办法》第十六条：不得诱导投保人不履行如实告知义务', '《保险法》第十六条：投保人故意不履行如实告知义务的，保险人有权解除合同'],
+            // 《金融产品网络营销管理办法》新增规则
+            '明星代言': ['《金融产品网络营销管理办法》第八条：不得利用演艺明星的名义或形象作推荐', '《金融产品网络营销管理办法》第十五条：禁止使用国家形象进行营销宣传'],
+            '网红推荐': ['《金融产品网络营销管理办法》第八条：不得利用网红、KOL的名义或形象作推荐', '《金融产品网络营销管理办法》第十五条：禁止使用敏感人物名义进行营销'],
+            '权威认证': ['《金融产品网络营销管理办法》第八条：不得冒用、伪造监管机构、行业协会名义进行营销', '《金融产品网络营销管理办法》第十五条：禁止虚假宣传资质'],
+            '银保监会备案': ['《金融产品网络营销管理办法》第六条：营销宣传内容应当与产品备案信息一致', '《金融产品网络营销管理办法》第十五条：不得冒用监管机构名义进行营销'],
+            '默认勾选': ['《金融产品网络营销管理办法》第十二条：不得默认勾选商品或服务', '《保险销售行为管理办法》第十七条第（五）款：不得使用默认勾选等方式'],
+            '每天推送': ['《金融产品网络营销管理办法》第十九条：不得向投保人频繁推送营销信息', '《保险销售行为管理办法》第二十条：不得进行骚扰性营销'],
+            // 《互联网保险业务监管办法》新增规则
+            '第三方平台': ['《互联网保险业务监管办法》第六条：非持牌机构不得开展互联网保险业务', '《互联网保险业务监管办法》第十一条：保险机构应当自营网络平台'],
+            '保单利益': ['《互联网保险业务监管办法》第十九条：保险机构不得对保单利益作出确定性承诺', '《人身保险销售行为管理办法》第五条第四款：不得对保险产品的收益作出确定性承诺'],
+            '投连险': ['《互联网保险业务监管办法》第十九条：投连险、万能险产品不得承诺无风险', '《人身保险销售行为管理办法》第七条第四款：不得使用误导性表述'],
+            '手续费': ['《互联网保险业务监管办法》第二十条：保险机构应当披露相关费用信息', '《保险销售行为管理办法》第十二条：应当向投保人明确说明费用扣除情况'],
+            '犹豫期': ['《互联网保险业务监管办法》第二十条：保险机构应当明确告知犹豫期相关权利', '《保险销售行为管理办法》第十五条：应当向投保人说明犹豫期权利'],
+            '除外责任': ['《互联网保险业务监管办法》第二十条：保险机构应当明确说明免除保险人责任的条款', '《人身保险销售行为管理办法》第十一条：应当向投保人明确说明免除保险人责任的条款'],
+            '退保': ['《互联网保险业务监管办法》第二十条：保险机构应当提示退保可能产生的损失', '《保险销售行为管理办法》第十五条：应当向投保人说明退保相关事宜'],
+            '停售': ['《保险销售行为管理办法》第五条第二款：不得进行虚假或者引人误解的宣传', '《人身保险行为管理办法》第七条：宣传应当真实、准确、完整'],
+            '返现': ['《保险销售行为管理办法》第十七条第（三）款：不得向投保人、被保险人或者受益人提供保险合同约定以外的利益', '《金融产品网络营销管理办法》第十六条：不得给予投保人保险合同约定以外的利益'],
+            '银行存款': ['《保险销售行为管理办法》第七条：不得与其他保险产品进行不恰当的比较', '《人身保险销售行为管理办法》第六条第六款：不得与银行存款、国债等进行不当比较'],
+            '某安': ['《保险销售行为管理办法》第六条：不得诋毁其他保险机构或者保险产品', '《人身保险销售行为管理办法》第六条第六款：不得诋毁其他保险机构或者保险产品进行不当比较']
+        };
+
+        function auditContent(content) {
+            const violations = [
+                // 收益承诺规则（7条）
+                { keyword: '保证', reason: '使用"保证"等确定性表述', type: '收益承诺' },
+                { keyword: '保底', reason: '使用"保底"等承诺性表述', type: '收益承诺' },
+                { keyword: '无风险', reason: '声称"无风险"违反监管规定', type: '收益承诺' },
+                { keyword: '零风险', reason: '"零风险"属于违规承诺', type: '收益承诺' },
+                { keyword: '稳赚', reason: '"稳赚不赔"属于违规承诺', type: '收益承诺' },
+                { keyword: '保本', reason: '"保本"属于收益承诺违规', type: '收益承诺' },
+                { keyword: '本金安全', reason: '本金安全承诺违规', type: '收益承诺' },
+                { keyword: '收益率', reason: '承诺确定收益率违规', type: '收益承诺' },
+                { keyword: '稳赚不赔', reason: '绝对化承诺违规', type: '收益承诺' },
+                { keyword: '保单利益', reason: '对保单利益作出确定性承诺', type: '收益承诺' },
+                { keyword: '投连险', reason: '投连险不得承诺无风险', type: '收益承诺' },
+                { keyword: '绝对不会亏', reason: '"绝对不会亏"属于无风险承诺', type: '收益承诺' },
+                { keyword: '一定赚钱', reason: '"一定赚钱"属于确定性收益承诺', type: '收益承诺' },
+                
+                // 误导性表述规则（10条）
+                { keyword: '必须购买', reason: '强制搭售违规', type: '误导性表述' },
+                { keyword: '帮您代', reason: '代签名或代填写违规', type: '误导性表述' },
+                { keyword: '不用看', reason: '隐瞒重要条款信息', type: '误导性表述' },
+                { keyword: '如实告知', reason: '诱导不如实告知', type: '误导性表述' },
+                { keyword: '最好的', reason: '"最好"等夸大宣传违规', type: '误导性表述' },
+                { keyword: '错过可惜', reason: '限时促销类误导性表述违规', type: '误导性表述' },
+                { keyword: '默认勾选', reason: '默认勾选或组合销售违规', type: '误导性表述' },
+                { keyword: '存款式', reason: '将保险与存款混淆宣传', type: '误导性表述' },
+                { keyword: '像活期', reason: '将保险与活期存款混淆', type: '误导性表述' },
+                { keyword: '历史最高', reason: '夸大历史业绩违规', type: '误导性表述' },
+                
+                // 虚假宣传规则（13条）
+                { keyword: '停售', reason: '虚假停售炒作', type: '虚假宣传' },
+                { keyword: '限时抢购', reason: '虚假限时促销', type: '虚假宣传' },
+                { keyword: '手续费', reason: '隐瞒或虚假宣传费用', type: '虚假宣传' },
+                { keyword: '犹豫期', reason: '隐瞒犹豫期权利', type: '虚假宣传' },
+                { keyword: '除外责任', reason: '隐瞒除外责任', type: '虚假宣传' },
+                { keyword: '退保', reason: '隐瞒退保损失', type: '虚假宣传' },
+                { keyword: '明星代言', reason: '利用明星名义推荐违规', type: '虚假宣传' },
+                { keyword: '网红推荐', reason: '利用KOL名义推荐违规', type: '虚假宣传' },
+                { keyword: '权威认证', reason: '虚假权威背书', type: '虚假宣传' },
+                { keyword: '银保监会备案', reason: '冒用监管机构名义营销', type: '虚假宣传' },
+                { keyword: '第三方平台', reason: '非持牌机构销售违规', type: '虚假宣传' },
+                { keyword: '每天推送', reason: '骚扰性营销', type: '虚假宣传' },
+                { keyword: '任何情况都赔付', reason: '隐瞒除外责任', type: '虚假宣传' },
+                
+                // 不当利益规则（2条）
+                { keyword: '返现', reason: '承诺返现违规', type: '不当利益' },
+                { keyword: '多送', reason: '赠送额外利益违规', type: '不当利益' },
+                
+                // 不当比较规则（2条）
+                { keyword: '银行存款', reason: '与银行存款不当比较', type: '不当比较' },
+                { keyword: '某安', reason: '贬低其他保险公司', type: '不当比较' }
+            ];
+
+            let isViolation = false, reasons = [], citedRegulations = [], violationTypes = new Set();
+            violations.forEach(item => {
+                if (content.includes(item.keyword)) { 
+                    isViolation = true; 
+                    reasons.push(item.reason);
+                    violationTypes.add(item.type);
+                    if (regulations[item.keyword]) {
+                        citedRegulations = [...new Set([...citedRegulations, ...regulations[item.keyword]])];
+                    }
+                }
+            });
+
+            let confidence = isViolation ? Math.min(0.75 + (reasons.length * 0.05), 0.98) : 0.75 + Math.random() * 0.2;
+            return {
+                is_compliance: isViolation ? 'no' : 'yes',
+                violation_type: Array.from(violationTypes).join('、') || '无',
+                confidence: confidence,
+                violation_reason: isViolation ? reasons.join('；') : '未检测到明显违规内容',
+                cited_regulations: citedRegulations
+            };
+        }
+
+        function sendMessage() {
+            const input = document.getElementById('userInput');
+            const message = input.value.trim();
+            if (!message) return;
+
+            addUserMessage(message);
+            input.value = '';
+            input.style.height = 'auto';
+            showLoading(true);
+
+            setTimeout(() => {
+                const result = auditContent(message);
+                addAuditResult(message, result);
+                chatHistory.push({ content: message, result: result, type: 'text', timestamp: new Date() });
+                showLoading(false);
+            }, 800);
+        }
+
+        function addUserMessage(message) {
+            const container = document.getElementById('chatMessages');
+            const div = document.createElement('div');
+            div.className = 'message user-message';
+            div.innerHTML = `<div class="message-avatar">👤</div><div class="message-content"><div class="message-text">${escapeHtml(message)}</div><div class="message-time">${formatTime(new Date())}</div></div>`;
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function addAuditResult(content, result) {
+            const container = document.getElementById('chatMessages');
+            const div = document.createElement('div');
+            div.className = 'message bot-message';
+            const isCompliance = result.is_compliance === 'yes';
+            
+            let regulationsHtml = '';
+            if (result.cited_regulations && result.cited_regulations.length > 0) {
+                regulationsHtml = `
+                    <div class="audit-result-item">
+                        <span class="audit-label">引用条例：</span>
+                        <span class="audit-value">
+                            <ul class="regulations-list">
+                                ${result.cited_regulations.map(r => `<li>📜 ${r}</li>`).join('')}
+                            </ul>
+                        </span>
+                    </div>
+                `;
+            }
+            
+            div.innerHTML = `
+                <div class="message-avatar">${isCompliance ? '✅' : '❌'}</div>
+                <div class="message-content">
+                    <div class="message-text">
+                        <strong>审核结果：</strong>${isCompliance ? '✓ 合规' : '✗ 不合规'}
+                        <div class="audit-result">
+                            <div class="audit-result-item"><span class="audit-label">违规类型：</span><span class="audit-value ${isCompliance ? '' : 'violation-type'}">${result.violation_type}</span></div>
+                            <div class="audit-result-item"><span class="audit-label">置信度：</span><span class="audit-value confidence">${(result.confidence * 100).toFixed(0)}%</span></div>
+                            <div class="audit-result-item"><span class="audit-label">违规原因：</span><span class="audit-value">${result.violation_reason}</span></div>
+                            ${regulationsHtml}
+                        </div>
+                    </div>
+                    <div class="message-time">${formatTime(new Date())}</div>
+                </div>
+            `;
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function updateHistoryView() {
+            const container = document.getElementById('historyList');
+            if (chatHistory.length === 0) {
+                container.innerHTML = '<div class="message bot-message"><div class="message-avatar">📋</div><div class="message-content"><div class="message-text">暂无审核记录</div></div></div>';
+                return;
+            }
+
+            container.innerHTML = chatHistory.slice().reverse().map(item => {
+                const isCompliance = item.result.is_compliance === 'yes';
+                const typeLabel = item.type === 'image' ? '🖼️ 图片审核' : (item.type === 'document' ? '📄 文档审核' : '📝 文本审核');
+                const contentLabel = item.type === 'text' ? '内容' : '提取文字';
+                return `
+                    <div class="message bot-message">
+                        <div class="message-avatar">${isCompliance ? '✅' : '❌'}</div>
+                        <div class="message-content">
+                            <div class="message-text">
+                                <strong>${typeLabel}</strong><br>
+                                <strong>${contentLabel}：</strong>${escapeHtml(item.content)}<br>
+                                <strong>结果：</strong>${isCompliance ? '✓ 合规' : '✗ 不合规'}<br>
+                                <strong>置信度：</strong>${(item.result.confidence * 100).toFixed(0)}%
+                            </div>
+                            <div class="message-time">${formatTime(item.timestamp)}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function showLoading(show) {
+            document.getElementById('loadingOverlay').style.display = show ? 'flex' : 'none';
+        }
+
+        function triggerFileInput() {
+            document.getElementById('fileInput').click();
+        }
+
+        function handleDragOver(event) {
+            event.preventDefault();
+            document.getElementById('imageUploadArea').classList.add('dragover');
+        }
+
+        function handleDrop(event) {
+            event.preventDefault();
+            document.getElementById('imageUploadArea').classList.remove('dragover');
+            const files = event.dataTransfer.files;
+            if (files.length > 0) processFile(files[0]);
+        }
+
+        function handleFileSelect(event) {
+            const files = event.target.files;
+            if (files.length > 0) processFile(files[0]);
+        }
+
+        function processFile(file) {
+            if (!file.type.startsWith('image/')) {
+                alert('请选择图片文件');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const img = document.getElementById('imagePreview');
+                img.src = e.target.result;
+                img.style.display = 'block';
+                selectedImage = e.target.result;
+                showLoading(true);
+
+                setTimeout(() => {
+                    simulateOCRAndAudit(e.target.result);
+                    showLoading(false);
+                }, 1500);
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function simulateOCRAndAudit(imageData) {
+            const container = document.getElementById('imageResult');
+            
+            // 显示OCR识别进度
+            container.innerHTML = `
+                <div class="message bot-message">
+                    <div class="message-avatar">🤖</div>
+                    <div class="message-content">
+                        <div class="message-text">
+                            <strong>📷 正在进行OCR文字识别...</strong>
+                            <div id="ocrProgress" style="margin-top: 0.5rem;">
+                                <div class="progress-bar" style="width: 100%; height: 8px; background: #e2e8f0; border-radius: 4px; overflow: hidden;">
+                                    <div id="progressFill" style="width: 0%; height: 100%; background: linear-gradient(90deg, var(--primary), var(--secondary)); transition: width 0.3s;"></div>
+                                </div>
+                                <div id="progressText" style="font-size: 0.8rem; color: #718096; margin-top: 0.25rem;">正在加载OCR引擎...</div>
+                            </div>
+                        </div>
+                        <div class="message-time">${formatTime(new Date())}</div>
+                    </div>
+                </div>
+            `;
+            
+            // 使用 Tesseract.js 进行OCR识别
+            Tesseract.recognize(
+                imageData,
+                'chi_sim', // 简体中文
+                {
+                    logger: m => {
+                        if (m.status === 'recognizing text') {
+                            const progress = Math.round(m.progress * 100);
+                            document.getElementById('progressFill').style.width = progress + '%';
+                            document.getElementById('progressText').textContent = `正在识别文字... ${progress}%`;
+                        } else if (m.status === 'loading language') {
+                            document.getElementById('progressText').textContent = '正在加载语言包...';
+                        } else if (m.status === 'initializing api') {
+                            document.getElementById('progressText').textContent = '正在初始化OCR引擎...';
+                        }
+                    }
+                }
+            ).then(({ data: { text } }) => {
+                // OCR识别完成
+                const extractedText = text.trim();
+                
+                // 如果没有识别到文字
+                if (!extractedText) {
+                    container.innerHTML = `
+                        <div class="message bot-message">
+                            <div class="message-avatar">🤖</div>
+                            <div class="message-content">
+                                <div class="message-text">
+                                    <strong>📷 图片审核完成</strong>
+                                    <div class="ocr-extracted"><strong>OCR识别结果：</strong>未能在图片中识别到文字</div>
+                                    <div class="audit-result">
+                                        <div class="audit-result-item"><span class="audit-label">审核结果：</span><span class="audit-value compliance-yes">⚠️ 无法审核</span></div>
+                                        <div class="audit-result-item"><span class="audit-label">说明：</span><span class="audit-value">请确保图片中包含清晰的文字内容</span></div>
+                                    </div>
+                                </div>
+                                <div class="message-time">${formatTime(new Date())}</div>
+                            </div>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                // 对识别出的所有文字进行审核
+                const result = auditContent(extractedText);
+                
+                let regulationsHtml = '';
+                if (result.cited_regulations && result.cited_regulations.length > 0) {
+                    regulationsHtml = `
+                        <div class="audit-result-item">
+                            <span class="audit-label">引用条例：</span>
+                            <span class="audit-value">
+                                <ul class="regulations-list">
+                                    ${result.cited_regulations.map(r => `<li>📜 ${r}</li>`).join('')}
+                                </ul>
+                            </span>
+                        </div>
+                    `;
+                }
+                
+                container.innerHTML = `
+                    <div class="message bot-message">
+                        <div class="message-avatar">🤖</div>
+                        <div class="message-content">
+                            <div class="message-text">
+                                <strong>📷 图片审核完成</strong>
+                                <div class="ocr-extracted"><strong>OCR提取全部文字：</strong><br>${escapeHtml(extractedText)}</div>
+                                <div class="audit-result">
+                                    <div class="audit-result-item"><span class="audit-label">审核结果：</span><span class="audit-value ${result.is_compliance === 'yes' ? 'compliance-yes' : 'compliance-no'}">${result.is_compliance === 'yes' ? '✓ 合规' : '✗ 不合规'}</span></div>
+                                    <div class="audit-result-item"><span class="audit-label">违规类型：</span><span class="audit-value ${result.is_compliance === 'no' ? 'violation-type' : ''}">${result.violation_type}</span></div>
+                                    <div class="audit-result-item"><span class="audit-label">置信度：</span><span class="audit-value confidence">${(result.confidence * 100).toFixed(0)}%</span></div>
+                                    <div class="audit-result-item"><span class="audit-label">违规原因：</span><span class="audit-value">${result.violation_reason}</span></div>
+                                    ${regulationsHtml}
+                                </div>
+                            </div>
+                            <div class="message-time">${formatTime(new Date())}</div>
+                        </div>
+                    </div>
+                `;
+                
+                chatHistory.push({ content: extractedText, result: result, type: 'image', timestamp: new Date() });
+            }).catch(err => {
+                console.error('OCR识别失败:', err);
+                container.innerHTML = `
+                    <div class="message bot-message">
+                        <div class="message-avatar">🤖</div>
+                        <div class="message-content">
+                            <div class="message-text">
+                                <strong>📷 图片审核失败</strong>
+                                <div class="audit-result">
+                                    <div class="audit-result-item"><span class="audit-label">错误：</span><span class="audit-value">OCR识别失败，请重试</span></div>
+                                </div>
+                            </div>
+                            <div class="message-time">${formatTime(new Date())}</div>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        function triggerDocFileInput() {
+            document.getElementById('docFileInput').click();
+        }
+
+        function handleDocDragOver(event) {
+            event.preventDefault();
+            document.getElementById('documentUploadArea').classList.add('dragover');
+        }
+
+        function handleDocDrop(event) {
+            event.preventDefault();
+            document.getElementById('documentUploadArea').classList.remove('dragover');
+            const files = event.dataTransfer.files;
+            if (files.length > 0) processDocument(files[0]);
+        }
+
+        function handleDocFileSelect(event) {
+            const files = event.target.files;
+            if (files.length > 0) processDocument(files[0]);
+        }
+
+        function processDocument(file) {
+            const validTypes = ['application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain', 'application/pdf'];
+            if (!validTypes.includes(file.type) && !file.name.match(/\.(doc|docx|txt|pdf)$/i)) {
+                alert('请选择有效的文档文件（DOC、DOCX、TXT、PDF）');
+                return;
+            }
+
+            showLoading(true);
+
+            setTimeout(() => {
+                simulateDocExtract(file);
+                showLoading(false);
+            }, 1500);
+        }
+
+        function simulateDocExtract(file) {
+            const docContents = [
+                '本产品保证年化收益率8%，投资无风险，稳赚不赔！',
+                '重疾保险产品介绍：本产品提供全面的重大疾病保障，涵盖100种疾病。',
+                '养老保险，保证本金安全，收益稳定增长，错过可惜！',
+                '万能险产品说明：预期年化收益率可达6%以上，保本保息。',
+                '医疗保险宣传：我们的产品是市场上最好的保险产品，保障最全面。'
+            ];
+
+            const extractedText = docContents[Math.floor(Math.random() * docContents.length)];
+            const result = auditContent(extractedText);
+
+            let regulationsHtml = '';
+            if (result.cited_regulations && result.cited_regulations.length > 0) {
+                regulationsHtml = `
+                    <div class="audit-result-item">
+                        <span class="audit-label">引用条例：</span>
+                        <span class="audit-value">
+                            <ul class="regulations-list">
+                                ${result.cited_regulations.map(r => `<li>📜 ${r}</li>`).join('')}
+                            </ul>
+                        </span>
+                    </div>
+                `;
+            }
+
+            const container = document.getElementById('documentResult');
+            container.innerHTML = `
+                <div class="message bot-message">
+                    <div class="message-avatar">📄</div>
+                    <div class="message-content">
+                        <div class="message-text">
+                            <strong>📄 文档审核完成</strong>
+                            <div style="margin-top: 0.5rem;"><strong>文件名：</strong>${file.name}</div>
+                            <div class="ocr-extracted"><strong>提取内容：</strong>${extractedText}</div>
+                            <div class="audit-result">
+                                <div class="audit-result-item"><span class="audit-label">审核结果：</span><span class="audit-value ${result.is_compliance === 'yes' ? 'compliance-yes' : 'compliance-no'}">${result.is_compliance === 'yes' ? '✓ 合规' : '✗ 不合规'}</span></div>
+                                <div class="audit-result-item"><span class="audit-label">违规类型：</span><span class="audit-value ${result.is_compliance === 'no' ? 'violation-type' : ''}">${result.violation_type}</span></div>
+                                <div class="audit-result-item"><span class="audit-label">置信度：</span><span class="audit-value confidence">${(result.confidence * 100).toFixed(0)}%</span></div>
+                                <div class="audit-result-item"><span class="audit-label">违规原因：</span><span class="audit-value">${result.violation_reason}</span></div>
+                                ${regulationsHtml}
+                            </div>
+                        </div>
+                        <div class="message-time">${formatTime(new Date())}</div>
+                    </div>
+                </div>
+            `;
+
+            chatHistory.push({ content: extractedText, result: result, type: 'document', timestamp: new Date() });
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('welcomeTime').textContent = formatTime(new Date());
+        });
+    </script>
+</body>
+</html>
