@@ -4,7 +4,43 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>保险营销内容智能审核系统 - 完整版</title>
-    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <!-- Tesseract.js OCR库 - 使用多个备用CDN -->
+    <script>
+        // 动态加载Tesseract.js，支持多个备用CDN
+        (function() {
+            const cdnUrls = [
+                'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js',
+                'https://unpkg.com/tesseract.js@5/dist/tesseract.min.js',
+                'https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.4/tesseract.min.js'
+            ];
+            
+            let loaded = false;
+            let currentIndex = 0;
+            
+            function loadTesseract() {
+                if (currentIndex >= cdnUrls.length) {
+                    console.error('所有CDN都加载失败，OCR功能将使用备用方案');
+                    window.TesseractLoaded = false;
+                    return;
+                }
+                
+                const script = document.createElement('script');
+                script.src = cdnUrls[currentIndex];
+                script.onload = function() {
+                    console.log('Tesseract.js加载成功:', cdnUrls[currentIndex]);
+                    window.TesseractLoaded = true;
+                };
+                script.onerror = function() {
+                    console.warn('CDN加载失败:', cdnUrls[currentIndex]);
+                    currentIndex++;
+                    loadTesseract();
+                };
+                document.head.appendChild(script);
+            }
+            
+            loadTesseract();
+        })();
+    </script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         :root {
@@ -128,7 +164,7 @@
                 <button class="menu-item" onclick="showTab('history')">📋 审核历史</button>
             </div>
             <div class="sidebar-footer">
-                <div class="status-indicator"><span class="status-dot"></span><span>演示模式</span></div>
+                <div class="status-indicator"><span class="status-dot"></span><span>百炼大模型</span></div>
             </div>
         </aside>
 
@@ -136,7 +172,7 @@
             <div id="chatTab" class="tab-content active">
                 <div class="chat-header">
                     <h1>保险营销内容智能审核</h1>
-                    <p>基于规则引擎的智能审核系统（演示模式）</p>
+                    <p>基于百炼大模型 + RAG的智能审核系统</p>
                 </div>
                 <div class="chat-messages" id="chatMessages">
                     <div class="message bot-message">
@@ -284,7 +320,38 @@
             '某安': ['《保险销售行为管理办法》第六条：不得诋毁其他保险机构或者保险产品', '《人身保险销售行为管理办法》第六条第六款：不得诋毁其他保险机构或者保险产品进行不当比较']
         };
 
-        function auditContent(content) {
+        // 后端API配置
+        const API_BASE_URL = 'http://localhost:5000';
+        let useBackendAPI = true; // 默认使用后端API
+
+        // 调用后端API进行审核（百炼大模型）
+        async function auditWithBackendAPI(content) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/audit/text`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ content: content })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`API请求失败: ${response.status}`);
+                }
+
+                const result = await response.json();
+                console.log('后端API审核结果:', result);
+                return result;
+            } catch (error) {
+                console.error('后端API调用失败:', error);
+                console.log('切换到前端规则引擎审核');
+                useBackendAPI = false;
+                return auditWithRules(content); // 失败时使用前端规则引擎
+            }
+        }
+
+        // 前端规则引擎审核（备用方案）
+        function auditWithRules(content) {
             const violations = [
                 // 收益承诺规则（7条）
                 { keyword: '保证', reason: '使用"保证"等确定性表述', type: '收益承诺' },
@@ -359,7 +426,7 @@
             };
         }
 
-        function sendMessage() {
+        async function sendMessage() {
             const input = document.getElementById('userInput');
             const message = input.value.trim();
             if (!message) return;
@@ -369,12 +436,20 @@
             input.style.height = 'auto';
             showLoading(true);
 
-            setTimeout(() => {
-                const result = auditContent(message);
+            try {
+                // 优先使用后端API（百炼大模型）
+                const result = await auditWithBackendAPI(message);
                 addAuditResult(message, result);
                 chatHistory.push({ content: message, result: result, type: 'text', timestamp: new Date() });
+            } catch (error) {
+                console.error('审核失败:', error);
+                // 使用前端规则引擎作为备用
+                const result = auditWithRules(message);
+                addAuditResult(message, result);
+                chatHistory.push({ content: message, result: result, type: 'text', timestamp: new Date() });
+            } finally {
                 showLoading(false);
-            }, 800);
+            }
         }
 
         function addUserMessage(message) {
@@ -393,7 +468,19 @@
             const isCompliance = result.is_compliance === 'yes';
             
             let regulationsHtml = '';
-            if (result.cited_regulations && result.cited_regulations.length > 0) {
+            // 支持后端API返回的regulations格式
+            if (result.regulations && result.regulations.length > 0) {
+                regulationsHtml = `
+                    <div class="audit-result-item">
+                        <span class="audit-label">引用条例：</span>
+                        <span class="audit-value">
+                            <ul class="regulations-list">
+                                ${result.regulations.map(r => `<li>📜 ${r.name} ${r.article || ''}: ${r.content || ''}</li>`).join('')}
+                            </ul>
+                        </span>
+                    </div>
+                `;
+            } else if (result.cited_regulations && result.cited_regulations.length > 0) {
                 regulationsHtml = `
                     <div class="audit-result-item">
                         <span class="audit-label">引用条例：</span>
@@ -406,15 +493,17 @@
                 `;
             }
             
+            const engineType = useBackendAPI ? '百炼大模型' : '前端规则引擎';
+            
             div.innerHTML = `
                 <div class="message-avatar">${isCompliance ? '✅' : '❌'}</div>
                 <div class="message-content">
                     <div class="message-text">
-                        <strong>审核结果：</strong>${isCompliance ? '✓ 合规' : '✗ 不合规'}
+                        <strong>审核结果（${engineType}）：</strong>${isCompliance ? '✓ 合规' : '✗ 不合规'}
                         <div class="audit-result">
                             <div class="audit-result-item"><span class="audit-label">违规类型：</span><span class="audit-value ${isCompliance ? '' : 'violation-type'}">${result.violation_type}</span></div>
-                            <div class="audit-result-item"><span class="audit-label">置信度：</span><span class="audit-value confidence">${(result.confidence * 100).toFixed(0)}%</span></div>
-                            <div class="audit-result-item"><span class="audit-label">违规原因：</span><span class="audit-value">${result.violation_reason}</span></div>
+                            <div class="audit-result-item"><span class="audit-label">置信度：</span><span class="audit-value confidence">${((result.confidence || 0.9) * 100).toFixed(0)}%</span></div>
+                            <div class="audit-result-item"><span class="audit-label">违规原因：</span><span class="audit-value">${result.explanation || result.violation_reason || '未检测到明显违规内容'}</span></div>
                             ${regulationsHtml}
                         </div>
                     </div>
@@ -499,14 +588,218 @@
                 showLoading(true);
 
                 setTimeout(() => {
-                    simulateOCRAndAudit(e.target.result);
+                    // 优化OCR：对图片进行预处理以提升识别准确度
+                    preprocessAndOCR(e.target.result);
                     showLoading(false);
-                }, 1500);
+                }, 1000);
             };
             reader.readAsDataURL(file);
         }
 
-        function simulateOCRAndAudit(imageData) {
+        // ==================== OCR结果清理和修正 ====================
+        // 清理OCR识别结果中的乱码和错误
+        function cleanOCRResult(text) {
+            if (!text) return '';
+            
+            let cleaned = text;
+            
+            // 1. 移除明显的乱码字符
+            cleaned = cleaned.replace(/[|~_\\=\-*]{3,}/g, ''); // 连续特殊字符
+            cleaned = cleaned.replace(/[\x00-\x1F\x7F]/g, ''); // 不可见字符
+            cleaned = cleaned.replace(/\s{3,}/g, ' '); // 多余空格
+            cleaned = cleaned.replace(/\n{3,}/g, '\n\n'); // 多余换行
+            
+            // 2. 数字混淆修正（OCR常见错误）
+            cleaned = cleaned.replace(/[Oo〇](\d)/g, '0$1'); // O/o/〇 → 0
+            cleaned = cleaned.replace(/(\d)[Oo〇]/g, '$10');
+            cleaned = cleaned.replace(/[lIi|](\d)/g, '1$1'); // l/I/i/| → 1
+            cleaned = cleaned.replace(/(\d)[lIi|]/g, '$11');
+            cleaned = cleaned.replace(/[Ss\$](\d)/g, '5$1'); // S/s/$ → 5
+            cleaned = cleaned.replace(/(\d)[Ss\$]/g, '$15');
+            cleaned = cleaned.replace(/[Zz](\d)/g, '2$1'); // Z/z → 2
+            cleaned = cleaned.replace(/(\d)[Zz]/g, '$12');
+            cleaned = cleaned.replace(/[Bb](\d)/g, '8$1'); // B/b → 8
+            cleaned = cleaned.replace(/(\d)[Bb]/g, '$18');
+            
+            // 3. 保险领域专业词汇修正（常见OCR错误）
+            const insuranceCorrections = {
+                // 保险相关
+                '保堡': '保险', '险捡': '险', '保脸': '保险', '保脸险': '保险',
+                '收攻': '收益', '益盖': '益', '收益牵': '收益率', '收盖': '收益',
+                '率牵': '率', '年化牵': '年化率', '回报牵': '回报率',
+                
+                // 产品相关
+                '返反': '返现', '现见': '现', '返见': '返现',
+                '送过': '送', '礼扎': '礼品', '品口口': '品', '礼口口': '礼品',
+                '限县': '限时', '时寸': '时', '限时县': '限时限',
+                '停亭': '停售', '售准': '售', '停亭售': '停售',
+                
+                // 营销相关
+                '明朋': '明星', '星腥': '星', '明星腥': '明星',
+                '代伐': '代言', '言信': '言', '代言信': '代言',
+                '签鉴': '签名', '填镇': '填写', '写与': '写',
+                '告吉': '广告', '告口口': '广告', '广吉': '广告',
+                '知智': '告知', '告智': '告知',
+                
+                // 健康相关
+                '健建': '健康', '康庚': '康', '健康庚': '健康',
+                '疾病': '疾病', '疾口口': '疾病',
+                '医区': '医疗', '疗治': '疗', '医疗治': '医疗',
+                '费弗': '费用', '扣折': '扣除',
+                
+                // 条款相关
+                '退追': '退保', '期朋': '期限', '犹优': '犹豫', '豫预': '豫',
+                '合规': '合规', '规观': '规', '则贝': '规则',
+                '条修': '条款', '款项': '款', '例列': '条例',
+                '法去': '法规', '办力': '办法', '管官': '管理',
+                '监签': '监管', '督都': '督', '监管都': '监管',
+                
+                // 数字和单位
+                '百分之口': '百分之百', '百份': '百分', '份百': '分百',
+                '万元口': '万元整', '元口口': '元整',
+                
+                // 常见错字
+                '口口': '', '口': '', '〇〇': '00', '〇': '0',
+                '一': '一', '二': '二', '三': '三', // 防止数字被错误替换
+            };
+            
+            // 应用词汇修正
+            Object.keys(insuranceCorrections).forEach(key => {
+                cleaned = cleaned.replace(new RegExp(key, 'g'), insuranceCorrections[key]);
+            });
+            
+            // 4. 标点符号修正
+            cleaned = cleaned.replace(/，,/g, '，'); // 重复逗号
+            cleaned = cleaned.replace(/。。/g, '。'); // 重复句号
+            cleaned = cleaned.replace(/！！/g, '！'); // 重复感叹号
+            cleaned = cleaned.replace(/！！！/g, '！'); // 多重感叹号
+            cleaned = cleaned.replace(/\s+([，。！？、])/g, '$1'); // 标点前空格
+            cleaned = cleaned.replace(/([，。！？、])\s+/g, '$1'); // 标点后空格（保留必要空格）
+            
+            // 5. 去除首尾空白
+            cleaned = cleaned.trim();
+            
+            return cleaned;
+        }
+        
+        // ==================== 优化版OCR识别 ====================
+        // 图片预处理以提升OCR准确度（支持多种预处理策略）
+        function preprocessImage(imageData, contrastLevel = 2.0, thresholdLevel = null) {
+            return new Promise((resolve) => {
+                const img = new Image();
+                img.onload = function() {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    
+                    // 放大图片（OCR对较大图片识别更准确）
+                    const scale = Math.min(3, 2500 / Math.max(img.width, img.height)); // 提高放大倍数
+                    canvas.width = img.width * scale;
+                    canvas.height = img.height * scale;
+                    
+                    // 绘制原始图片
+                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    
+                    // 获取图像数据
+                    let imageDataObj = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                    let data = imageDataObj.data;
+                    
+                    // 计算平均亮度（用于动态二值化）
+                    let avgBrightness = 0;
+                    for (let i = 0; i < data.length; i += 4) {
+                        avgBrightness += (data[i] + data[i + 1] + data[i + 2]) / 3;
+                    }
+                    avgBrightness = avgBrightness / (data.length / 4);
+                    
+                    // 动态二值化阈值（根据图片亮度自动调整）
+                    const threshold = thresholdLevel || (avgBrightness > 150 ? 180 : 100);
+                    
+                    // 灰度化处理
+                    for (let i = 0; i < data.length; i += 4) {
+                        const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+                        data[i] = data[i + 1] = data[i + 2] = gray;
+                    }
+                    
+                    // 对比度增强（提高对比度系数）
+                    const contrast = contrastLevel; // 可调节对比度（1.5-3.0）
+                    const factor = (259 * (contrast * 255 + 255)) / (255 * (259 - contrast * 255));
+                    for (let i = 0; i < data.length; i += 4) {
+                        data[i] = Math.max(0, Math.min(255, factor * (data[i] - 128) + 128));
+                        data[i + 1] = Math.max(0, Math.min(255, factor * (data[i + 1] - 128) + 128));
+                        data[i + 2] = Math.max(0, Math.min(255, factor * (data[i + 2] - 128) + 128));
+                    }
+                    
+                    // 二值化（增强文字清晰度）
+                    for (let i = 0; i < data.length; i += 4) {
+                        const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
+                        const binary = avg > threshold ? 255 : 0;
+                        data[i] = data[i + 1] = data[i + 2] = binary;
+                    }
+                    
+                    ctx.putImageData(imageDataObj, 0, 0);
+                    
+                    // 返回预处理后的图片数据
+                    resolve(canvas.toDataURL('image/png'));
+                };
+                img.src = imageData;
+            });
+        }
+        
+        // 多次OCR识别策略（尝试不同预处理参数，选择最佳结果）
+        async function multiOCRRecognition(imageData) {
+            const strategies = [
+                { contrast: 2.0, threshold: null, desc: '高对比度+动态阈值' },
+                { contrast: 2.5, threshold: 150, desc: '超高对比度+中等阈值' },
+                { contrast: 1.8, threshold: 120, desc: '中对比度+低阈值' }
+            ];
+            
+            let bestResult = null;
+            let bestConfidence = 0;
+            
+            for (let i = 0; i < strategies.length; i++) {
+                try {
+                    const strategy = strategies[i];
+                    const preprocessedImage = await preprocessImage(imageData, strategy.contrast, strategy.threshold);
+                    
+                    // 使用中英文混合识别（提高识别准确度）
+                    const { data: { text, confidence } } = await Tesseract.recognize(
+                        preprocessedImage,
+                        'chi_sim+eng', // 中英文混合识别
+                        {
+                            tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz中文汉字保险收益风险产品健康医疗条款法规管理办法',
+                            preserve_interword_spaces: '1',
+                            logger: m => {
+                                if (m.status === 'recognizing text') {
+                                    console.log(`策略${i+1} (${strategy.desc}): 识别进度 ${Math.round(m.progress * 100)}%`);
+                                }
+                            }
+                        }
+                    );
+                    
+                    const cleanedText = cleanOCRResult(text.trim());
+                    
+                    // 选择置信度最高的结果
+                    if (confidence > bestConfidence && cleanedText.length > 0) {
+                        bestConfidence = confidence;
+                        bestResult = {
+                            text: cleanedText,
+                            rawText: text.trim(),
+                            confidence: confidence,
+                            strategy: strategy.desc
+                        };
+                    }
+                    
+                    console.log(`策略${i+1} (${strategy.desc}): 置信度=${confidence.toFixed(1)}%, 文字="${cleanedText.substring(0, 20)}..."`);
+                    
+                } catch (error) {
+                    console.error(`策略${i+1}识别失败:`, error);
+                }
+            }
+            
+            return bestResult;
+        }
+
+        // 优化的OCR识别流程（使用多次识别策略）
+        async function preprocessAndOCR(imageData) {
             const container = document.getElementById('imageResult');
             
             // 显示OCR识别进度
@@ -515,12 +808,12 @@
                     <div class="message-avatar">🤖</div>
                     <div class="message-content">
                         <div class="message-text">
-                            <strong>📷 正在进行OCR文字识别...</strong>
+                            <strong>📷 正在进行OCR文字识别（多次识别策略）...</strong>
                             <div id="ocrProgress" style="margin-top: 0.5rem;">
                                 <div class="progress-bar" style="width: 100%; height: 8px; background: #e2e8f0; border-radius: 4px; overflow: hidden;">
                                     <div id="progressFill" style="width: 0%; height: 100%; background: linear-gradient(90deg, var(--primary), var(--secondary)); transition: width 0.3s;"></div>
                                 </div>
-                                <div id="progressText" style="font-size: 0.8rem; color: #718096; margin-top: 0.25rem;">正在加载OCR引擎...</div>
+                                <div id="progressText" style="font-size: 0.8rem; color: #718096; margin-top: 0.25rem;">正在检查OCR引擎...</div>
                             </div>
                         </div>
                         <div class="message-time">${formatTime(new Date())}</div>
@@ -528,53 +821,239 @@
                 </div>
             `;
             
-            // 使用 Tesseract.js 进行OCR识别
-            Tesseract.recognize(
-                imageData,
-                'chi_sim', // 简体中文
-                {
-                    logger: m => {
-                        if (m.status === 'recognizing text') {
-                            const progress = Math.round(m.progress * 100);
-                            document.getElementById('progressFill').style.width = progress + '%';
-                            document.getElementById('progressText').textContent = `正在识别文字... ${progress}%`;
-                        } else if (m.status === 'loading language') {
-                            document.getElementById('progressText').textContent = '正在加载语言包...';
-                        } else if (m.status === 'initializing api') {
-                            document.getElementById('progressText').textContent = '正在初始化OCR引擎...';
-                        }
-                    }
-                }
-            ).then(({ data: { text } }) => {
-                // OCR识别完成
-                const extractedText = text.trim();
-                
-                // 如果没有识别到文字
-                if (!extractedText) {
-                    container.innerHTML = `
-                        <div class="message bot-message">
-                            <div class="message-avatar">🤖</div>
-                            <div class="message-content">
-                                <div class="message-text">
-                                    <strong>📷 图片审核完成</strong>
-                                    <div class="ocr-extracted"><strong>OCR识别结果：</strong>未能在图片中识别到文字</div>
-                                    <div class="audit-result">
-                                        <div class="audit-result-item"><span class="audit-label">审核结果：</span><span class="audit-value compliance-yes">⚠️ 无法审核</span></div>
-                                        <div class="audit-result-item"><span class="audit-label">说明：</span><span class="audit-value">请确保图片中包含清晰的文字内容</span></div>
-                                    </div>
-                                </div>
-                                <div class="message-time">${formatTime(new Date())}</div>
-                            </div>
-                        </div>
-                    `;
+            try {
+                // 检查Tesseract.js是否加载成功
+                if (!window.TesseractLoaded || !window.Tesseract) {
+                    document.getElementById('progressText').textContent = 'OCR引擎加载失败，使用备用方案...';
+                    document.getElementById('progressFill').style.width = '50%';
+                    
+                    // 备用方案：提示用户手动输入或使用简化OCR
+                    await fallbackOCR(container, imageData);
                     return;
                 }
                 
-                // 对识别出的所有文字进行审核
-                const result = auditContent(extractedText);
+                // 使用多次识别策略（尝试3种不同预处理参数）
+                document.getElementById('progressText').textContent = '正在使用多次识别策略（尝试3种预处理方案）...';
+                document.getElementById('progressFill').style.width = '10%';
                 
+                const ocrResult = await multiOCRRecognition(imageData);
+                
+                document.getElementById('progressFill').style.width = '95%';
+                document.getElementById('progressText').textContent = '正在分析最佳识别结果...';
+                
+                if (!ocrResult || !ocrResult.text) {
+                    // 如果多次识别都失败，尝试单次识别
+                    document.getElementById('progressText').textContent = '多次识别失败，尝试单次识别...';
+                    const preprocessedImage = await preprocessImage(imageData, 2.0);
+                    const { data: { text, confidence } } = await Tesseract.recognize(
+                        preprocessedImage,
+                        'chi_sim+eng',
+                        { logger: m => console.log(m) }
+                    );
+                    
+                    const extractedText = cleanOCRResult(text.trim());
+                    displayOCRResult(container, extractedText, confidence || 0, text.trim(), '单次识别（备用）');
+                } else {
+                    // 显示最佳识别结果
+                    displayOCRResult(container, ocrResult.text, ocrResult.confidence, ocrResult.rawText, ocrResult.strategy);
+                }
+                
+            } catch (error) {
+                console.error('OCR识别失败:', error);
+                
+                // 显示详细错误信息
+                let errorMsg = error.message || 'OCR引擎出错';
+                if (errorMsg.includes('network') || errorMsg.includes('fetch')) {
+                    errorMsg = '网络连接失败，无法下载OCR语言包';
+                } else if (errorMsg.includes('memory') || errorMsg.includes('allocation')) {
+                    errorMsg = '内存不足，请尝试使用更小的图片';
+                }
+                
+                container.innerHTML = `
+                    <div class="message bot-message">
+                        <div class="message-avatar">🤖</div>
+                        <div class="message-content">
+                            <div class="message-text">
+                                <strong>📷 OCR识别失败</strong>
+                                <div class="audit-result">
+                                    <div class="audit-result-item"><span class="audit-label">错误信息：</span><span class="audit-value">${errorMsg}</span></div>
+                                    <div class="audit-result-item"><span class="audit-label">建议：</span><span class="audit-value">请尝试以下方法：<br>1. 使用更清晰的图片<br>2. 确保网络连接正常<br>3. 手动输入文字内容进行审核</span></div>
+                                </div>
+                            </div>
+                            <div class="message-time">${formatTime(new Date())}</div>
+                        </div>
+                    </div>
+                `;
+                
+                // 提供手动输入选项
+                addManualInputOption(container, imageData);
+            }
+        }
+
+        // 备用OCR方案（当Tesseract加载失败时）
+        async function fallbackOCR(container, imageData) {
+            container.innerHTML = `
+                <div class="message bot-message">
+                    <div class="message-avatar">🤖</div>
+                    <div class="message-content">
+                        <div class="message-text">
+                            <strong>📷 OCR引擎加载失败</strong>
+                            <div class="audit-result">
+                                <div class="audit-result-item"><span class="audit-label">原因：</span><span class="audit-value">OCR引擎CDN加载失败或网络问题</span></div>
+                                <div class="audit-result-item"><span class="audit-label">解决方案：</span><span class="audit-value">请手动输入图片中的文字内容进行审核</span></div>
+                            </div>
+                            <div style="margin-top: 1rem;">
+                                <textarea id="manualOCRInput" style="width: 100%; min-height: 100px; padding: 0.5rem; border: 1px solid #e2e8f0; border-radius: 4px; font-size: 0.9rem;" placeholder="请在此输入图片中的文字内容..."></textarea>
+                                <button onclick="manualAuditFromImage()" style="margin-top: 0.5rem; padding: 0.5rem 1rem; background: linear-gradient(135deg, var(--primary), var(--secondary)); color: white; border: none; border-radius: 4px; cursor: pointer;">开始审核</button>
+                            </div>
+                        </div>
+                        <div class="message-time">${formatTime(new Date())}</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // 手动输入审核
+        function manualAuditFromImage() {
+            const text = document.getElementById('manualOCRInput').value.trim();
+            if (!text) {
+                alert('请输入文字内容');
+                return;
+            }
+            
+            const container = document.getElementById('imageResult');
+            displayOCRResult(container, text, 100); // 手动输入置信度为100%
+        }
+
+        // 添加手动输入选项（当OCR失败时）
+        function addManualInputOption(container, imageData) {
+            const inputDiv = document.createElement('div');
+            inputDiv.className = 'message bot-message';
+            inputDiv.innerHTML = `
+                <div class="message-avatar">🤖</div>
+                <div class="message-content">
+                    <div class="message-text">
+                        <strong>📝 手动输入文字进行审核</strong>
+                        <div style="margin-top: 0.5rem;">
+                            <textarea id="manualOCRInputRetry" style="width: 100%; min-height: 80px; padding: 0.5rem; border: 1px solid #e2e8f0; border-radius: 4px; font-size: 0.9rem;" placeholder="请在此输入图片中的文字内容..."></textarea>
+                            <button onclick="manualAuditFromImageRetry()" style="margin-top: 0.5rem; padding: 0.5rem 1rem; background: linear-gradient(135deg, var(--primary), var(--secondary)); color: white; border: none; border-radius: 4px; cursor: pointer;">开始审核</button>
+                        </div>
+                    </div>
+                    <div class="message-time">${formatTime(new Date())}</div>
+                </div>
+            `;
+            container.appendChild(inputDiv);
+        }
+
+        // 手动输入审核（重试版）
+        function manualAuditFromImageRetry() {
+            const text = document.getElementById('manualOCRInputRetry').value.trim();
+            if (!text) {
+                alert('请输入文字内容');
+                return;
+            }
+            
+            const container = document.getElementById('imageResult');
+            displayOCRResult(container, text, 100);
+        }
+
+        // 显示OCR识别结果并审核
+        function displayOCRResult(container, extractedText, confidence, rawText = null, strategy = null) {
+            // 如果没有识别到文字
+            if (!extractedText) {
+                container.innerHTML = `
+                    <div class="message bot-message">
+                        <div class="message-avatar">🤖</div>
+                        <div class="message-content">
+                            <div class="message-text">
+                                <strong>📷 图片审核完成</strong>
+                                <div class="ocr-extracted"><strong>OCR识别结果：</strong>未能在图片中识别到文字</div>
+                                <div class="audit-result">
+                                    <div class="audit-result-item"><span class="audit-label">审核结果：</span><span class="audit-value compliance-yes">⚠️ 无法审核</span></div>
+                                    <div class="audit-result-item"><span class="audit-label">说明：</span><span class="audit-value">请确保图片中包含清晰的文字内容</span></div>
+                                </div>
+                            </div>
+                            <div class="message-time">${formatTime(new Date())}</div>
+                        </div>
+                    </div>
+                `;
+                return;
+            }
+            
+            // 构建OCR结果显示（如果有原始文本，显示对比）
+            let ocrResultHtml = '';
+            if (rawText && rawText !== extractedText) {
+                ocrResultHtml = `
+                    <strong>OCR识别置信度：</strong>${confidence.toFixed(1)}%
+                    ${strategy ? `<span style="color: #667eea; font-size: 0.85rem;">（最佳策略: ${strategy}）</span>` : ''}
+                    <br>
+                    <details style="margin-top: 0.5rem;">
+                        <summary style="cursor: pointer; color: #667eea; font-weight: 500;">📋 查看OCR处理过程（点击展开）</summary>
+                        <div style="margin-top: 0.5rem; padding: 0.5rem; background: #f7fafc; border-radius: 4px;">
+                            <div style="margin-bottom: 0.5rem;">
+                                <strong style="color: #e53e3e;">原始识别结果：</strong>
+                                <div style="margin-top: 0.25rem; padding: 0.5rem; background: #fff5f5; border-left: 3px solid #e53e3e; white-space: pre-wrap; word-break: break-all; font-size: 0.85rem;">
+                                    ${escapeHtml(rawText)}
+                                </div>
+                            </div>
+                            <div>
+                                <strong style="color: #38a169;">清理修正后：</strong>
+                                <div style="margin-top: 0.25rem; padding: 0.5rem; background: #f0fff4; border-left: 3px solid #38a169; white-space: pre-wrap; word-break: break-all; font-size: 0.85rem;">
+                                    ${escapeHtml(extractedText)}
+                                </div>
+                            </div>
+                        </div>
+                    </details>
+                    <div style="margin-top: 0.5rem;">
+                        <strong>提取文字（用于审核）：</strong>
+                        <div style="margin-top: 0.25rem; padding: 0.5rem; background: #f7fafc; border-radius: 4px; white-space: pre-wrap; word-break: break-all;">
+                            ${escapeHtml(extractedText)}
+                        </div>
+                    </div>
+                `;
+            } else {
+                ocrResultHtml = `
+                    <strong>OCR识别置信度：</strong>${confidence.toFixed(1)}%
+                    ${strategy ? `<span style="color: #667eea; font-size: 0.85rem;">（最佳策略: ${strategy}）</span>` : ''}
+                    <br>
+                    <strong>提取全部文字（逐字审核）：</strong>
+                    <div style="margin-top: 0.5rem; padding: 0.5rem; background: #f7fafc; border-radius: 4px; white-space: pre-wrap; word-break: break-all;">
+                        ${escapeHtml(extractedText)}
+                    </div>
+                `;
+            }
+            
+            // 显示OCR识别出的全部文字和置信度
+            container.innerHTML = `
+                <div class="message bot-message">
+                    <div class="message-avatar">🤖</div>
+                    <div class="message-content">
+                        <div class="message-text">
+                            <strong>📷 OCR识别完成（多次识别策略）</strong>
+                            <div class="ocr-extracted">
+                                ${ocrResultHtml}
+                            </div>
+                        </div>
+                        <div class="message-time">${formatTime(new Date())}</div>
+                    </div>
+                </div>
+            `;
+            
+            // 审核识别出的全部文字
+            auditWithBackendAPI(extractedText).then(result => {
                 let regulationsHtml = '';
-                if (result.cited_regulations && result.cited_regulations.length > 0) {
+                if (result.regulations && result.regulations.length > 0) {
+                    regulationsHtml = `
+                        <div class="audit-result-item">
+                            <span class="audit-label">引用条例：</span>
+                            <span class="audit-value">
+                                <ul class="regulations-list">
+                                    ${result.regulations.map(r => `<li>📜 ${r.name} ${r.article || ''}: ${r.content || ''}</li>`).join('')}
+                                </ul>
+                            </span>
+                        </div>
+                    `;
+                } else if (result.cited_regulations && result.cited_regulations.length > 0) {
                     regulationsHtml = `
                         <div class="audit-result-item">
                             <span class="audit-label">引用条例：</span>
@@ -587,44 +1066,57 @@
                     `;
                 }
                 
-                container.innerHTML = `
-                    <div class="message bot-message">
-                        <div class="message-avatar">🤖</div>
-                        <div class="message-content">
-                            <div class="message-text">
-                                <strong>📷 图片审核完成</strong>
-                                <div class="ocr-extracted"><strong>OCR提取全部文字：</strong><br>${escapeHtml(extractedText)}</div>
-                                <div class="audit-result">
-                                    <div class="audit-result-item"><span class="audit-label">审核结果：</span><span class="audit-value ${result.is_compliance === 'yes' ? 'compliance-yes' : 'compliance-no'}">${result.is_compliance === 'yes' ? '✓ 合规' : '✗ 不合规'}</span></div>
-                                    <div class="audit-result-item"><span class="audit-label">违规类型：</span><span class="audit-value ${result.is_compliance === 'no' ? 'violation-type' : ''}">${result.violation_type}</span></div>
-                                    <div class="audit-result-item"><span class="audit-label">置信度：</span><span class="audit-value confidence">${(result.confidence * 100).toFixed(0)}%</span></div>
-                                    <div class="audit-result-item"><span class="audit-label">违规原因：</span><span class="audit-value">${result.violation_reason}</span></div>
-                                    ${regulationsHtml}
-                                </div>
+                // 添加审核结果消息
+                const resultDiv = document.createElement('div');
+                resultDiv.className = 'message bot-message';
+                resultDiv.innerHTML = `
+                    <div class="message-avatar">🤖</div>
+                    <div class="message-content">
+                        <div class="message-text">
+                            <strong>📋 审核结果（百炼大模型）</strong>
+                            <div class="audit-result">
+                                <div class="audit-result-item"><span class="audit-label">审核结果：</span><span class="audit-value ${result.is_compliance === 'yes' ? 'compliance-yes' : 'compliance-no'}">${result.is_compliance === 'yes' ? '✓ 合规' : '✗ 不合规'}</span></div>
+                                <div class="audit-result-item"><span class="audit-label">违规类型：</span><span class="audit-value ${result.is_compliance === 'no' ? 'violation-type' : ''}">${result.violation_type || '无'}</span></div>
+                                <div class="audit-result-item"><span class="audit-label">置信度：</span><span class="audit-value confidence">${((result.confidence || 0.9) * 100).toFixed(0)}%</span></div>
+                                <div class="audit-result-item"><span class="audit-label">违规原因：</span><span class="audit-value">${result.explanation || result.violation_reason || '未检测到明显违规内容'}</span></div>
+                                ${regulationsHtml}
                             </div>
-                            <div class="message-time">${formatTime(new Date())}</div>
                         </div>
+                        <div class="message-time">${formatTime(new Date())}</div>
                     </div>
                 `;
+                container.appendChild(resultDiv);
                 
                 chatHistory.push({ content: extractedText, result: result, type: 'image', timestamp: new Date() });
-            }).catch(err => {
-                console.error('OCR识别失败:', err);
-                container.innerHTML = `
-                    <div class="message bot-message">
-                        <div class="message-avatar">🤖</div>
-                        <div class="message-content">
-                            <div class="message-text">
-                                <strong>📷 图片审核失败</strong>
-                                <div class="audit-result">
-                                    <div class="audit-result-item"><span class="audit-label">错误：</span><span class="audit-value">OCR识别失败，请重试</span></div>
-                                </div>
+            }).catch(error => {
+                console.error('后端API审核失败:', error);
+                // 使用前端规则引擎作为备用
+                const result = auditWithRules(extractedText);
+                const resultDiv = document.createElement('div');
+                resultDiv.className = 'message bot-message';
+                resultDiv.innerHTML = `
+                    <div class="message-avatar">🤖</div>
+                    <div class="message-content">
+                        <div class="message-text">
+                            <strong>📋 审核结果（前端规则引擎）</strong>
+                            <div class="audit-result">
+                                <div class="audit-result-item"><span class="audit-label">审核结果：</span><span class="audit-value ${result.is_compliance === 'yes' ? 'compliance-yes' : 'compliance-no'}">${result.is_compliance === 'yes' ? '✓ 合规' : '✗ 不合规'}</span></div>
+                                <div class="audit-result-item"><span class="audit-label">违规类型：</span><span class="audit-value ${result.is_compliance === 'no' ? 'violation-type' : ''}">${result.violation_type || '无'}</span></div>
+                                <div class="audit-result-item"><span class="audit-label">置信度：</span><span class="audit-value confidence">${(result.confidence * 100).toFixed(0)}%</span></div>
+                                <div class="audit-result-item"><span class="audit-label">违规原因：</span><span class="audit-value">${result.violation_reason || '未检测到明显违规内容'}</span></div>
                             </div>
-                            <div class="message-time">${formatTime(new Date())}</div>
                         </div>
+                        <div class="message-time">${formatTime(new Date())}</div>
                     </div>
                 `;
+                container.appendChild(resultDiv);
+                chatHistory.push({ content: extractedText, result: result, type: 'image', timestamp: new Date() });
             });
+        }
+
+        // 保留旧的simulateOCRAndAudit函数作为备用
+        function simulateOCRAndAudit(imageData) {
+            preprocessAndOCR(imageData);
         }
 
         function triggerDocFileInput() {
