@@ -493,7 +493,16 @@
                 `;
             }
             
-            const engineType = useBackendAPI ? '百炼大模型' : '前端规则引擎';
+            let engineType = '前端规则引擎';
+            if (result.audit_source === 'rag_model') {
+                engineType = '百炼大模型+RAG';
+            } else if (result.audit_source === 'rule_engine') {
+                engineType = '规则引擎';
+            } else if (result.audit_source === 'rule_engine_fallback') {
+                engineType = '规则引擎(大模型降级)';
+            } else if (useBackendAPI) {
+                engineType = '百炼大模型';
+            }
             
             div.innerHTML = `
                 <div class="message-avatar">${isCompliance ? '✅' : '❌'}</div>
